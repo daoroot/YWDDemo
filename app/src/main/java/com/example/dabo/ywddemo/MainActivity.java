@@ -17,185 +17,178 @@ import java.io.FilenameFilter;
 
 public class MainActivity extends AppCompatActivity {
 
-    Thread updateThread;
-    ProgressBar pBar;
-    WebView webView;
-    Thread unZipThread;
-    int state_index = 0;
-    File[] files;
-    ProgressDialog waitingDialog;
+    private static final int MSG_WHAT_UPDATE_SUCCESS = 1;//更新资源下载成功
+    private static final int MSG_WHAT_UPDATE_FAILED = 2;//更新资源下载失败
+    private static final int MSG_WHAT_CHECK_SUCCESS = 3;//更新资源校验成功
+    private static final int MSG_WHAT_CHECK_FAILED = 4;//更新资源校验失败
+    private static final int MSG_WHAT_CHANGE_PAGE = 5;//切换网页
+
+    private ProgressBar mProgressBar;
+    private WebView mWebView;
+    private Thread mUpdateThread;//更新线程
+    private Thread mUnZipThread;//解压线程
+    private int mState_index = 0;//页面显示状态
+    private File[] mFiles;//解压完成后html文件列表
+    private ProgressDialog mWaitingDialog;//解压显示
 
     Handler mHandler = new Handler() {
         @Override
         public void handleMessage(Message msg) {
             super.handleMessage(msg);
-            if (msg.what == 1) {
-                Toast.makeText(getApplication(), "更新完成", Toast.LENGTH_SHORT).show();
-            } else if (msg.what == 2)
-                Toast.makeText(getApplication(), "更新资源校验失败", Toast.LENGTH_SHORT).show();
-            else if (msg.what == 3) {
-                state_index = 4;
-                if (waitingDialog != null && waitingDialog.isShowing()) {
-                    waitingDialog.cancel();
-                    ShareUtil.setBoolean(getApplication(), ShareUtil.unzip, true);
-                    DemoUtils.unzip = true;
-                    Toast.makeText(getApplication(), "解压完成", Toast.LENGTH_SHORT).show();
-                }
-                String fileDir = Constants.RES_URL.substring(Constants.RES_URL.lastIndexOf("/") + 1, Constants.RES_URL.lastIndexOf("."));
-                webView.loadUrl("file:///" + Constants.PATH_YWD_FILES + fileDir + "/" + msg.obj);
-            } else if (msg.what == 4) {
-                state_index = 5;
-                String fileDir = Constants.RES_URL.substring(Constants.RES_URL.lastIndexOf("/") + 1, Constants.RES_URL.lastIndexOf("."));
-                webView.loadUrl("file:///" + Constants.PATH_YWD_FILES + fileDir + "/" + msg.obj);
-            } else if (msg.what == 5) {
-                state_index = 3;
-                String fileDir = Constants.RES_URL.substring(Constants.RES_URL.lastIndexOf("/") + 1, Constants.RES_URL.lastIndexOf("."));
-                webView.loadUrl("file:///" + Constants.PATH_YWD_FILES + fileDir + "/" + msg.obj);
-            } else
-                Toast.makeText(getApplication(), "还没有用到", Toast.LENGTH_SHORT).show();
+            switch (msg.what) {
+                case MSG_WHAT_UPDATE_SUCCESS:
+                    if (MD5.checkMd5(YWDApp.RES_MD5, (String) msg.obj))
+                        mHandler.sendEmptyMessage(MSG_WHAT_CHECK_SUCCESS);
+                    else
+                        mHandler.sendEmptyMessage(MSG_WHAT_CHECK_FAILED);
+                    Toast.makeText(getApplication(), "更新完成", Toast.LENGTH_SHORT).show();
+                    break;
+                case MSG_WHAT_UPDATE_FAILED:
+                    Toast.makeText(getApplication(), "更新失败", Toast.LENGTH_SHORT).show();
+                    break;
+                case MSG_WHAT_CHECK_SUCCESS:
+                    ShareUtil.setBoolean(getApplication(), ShareUtil.update, false);
+                    YWDApp.update = false;
+                    Toast.makeText(getApplication(), "更新资源校验成功", Toast.LENGTH_SHORT).show();
+                    sendChangeMsg();
+                    break;
+                case MSG_WHAT_CHECK_FAILED:
+                    Toast.makeText(getApplication(), "更新资源校验失败", Toast.LENGTH_SHORT).show();
+                    break;
+                case MSG_WHAT_CHANGE_PAGE:
+                    if (mFiles != null && mFiles.length > 0 && mState_index >= mFiles.length)
+                        mState_index = 0;//切换到最后一个网页，再次切换回复到第一个更新页
+                    if (mState_index == 0 && (mFiles != null && mFiles.length <= 0 || mFiles == null))
+                        initWVData();
+                    else {
+                        if (mWaitingDialog != null && mWaitingDialog.isShowing()) {
+                            mWaitingDialog.cancel();
+                            ShareUtil.setBoolean(getApplication(), ShareUtil.unzip, true);
+                            YWDApp.unzip = true;
+                            Toast.makeText(getApplication(), "解压完成", Toast.LENGTH_SHORT).show();
+                        }
+                        String fileDir = Constants.RES_URL.substring(Constants.RES_URL.lastIndexOf("/") + 1, Constants.RES_URL.lastIndexOf("."));
+                        mWebView.loadUrl("file:///" + Constants.PATH_YWD_FILES + fileDir + "/" + mFiles[mState_index].getName());
+                        mState_index++;
+                    }
+                    break;
+                default:
+                    break;
+            }
         }
     };
+
+    private void initWVData() {
+        mWebView.loadUrl("file:///android_asset/搜狗搜索引擎 - 上网从搜狗开始.htm");
+    }
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        setContentView(R.layout.activity_main);
-        pBar = (ProgressBar) findViewById(R.id.pb);
-        DemoUtils.update = ShareUtil.getBoolean(getApplication(), ShareUtil.update, true);
-        DemoUtils.unzip = ShareUtil.getBoolean(getApplication(), ShareUtil.unzip, false);
+        YWDApp.update = ShareUtil.getBoolean(getApplication(), ShareUtil.update, true);
+        YWDApp.unzip = ShareUtil.getBoolean(getApplication(), ShareUtil.unzip, false);
         int progress = ShareUtil.getInt(getApplication(), ShareUtil.update_progress, 0);
         int max = ShareUtil.getInt(getApplication(), ShareUtil.update_max, 0);
-        pBar.setMax(max);
-        pBar.setProgress(progress);
+
+        setContentView(R.layout.activity_main);
+        mProgressBar = (ProgressBar) findViewById(R.id.pb);
+        mProgressBar.setMax(max);
+        mProgressBar.setProgress(progress);
         initFiles();
         DemoUtils.setUpdateCallBack(new UpdateCallBack() {
 
             @Override
-            public void update(int progress, String filePath) {
-                System.out.println("下载总进度：" + progress);
-                pBar.setProgress(progress);
+            public void update(int progress, String filePath, int progressMax) {
+                LogUtil.i("下载资源文件", "下载总进度：" + progress);
+                if (mProgressBar.getMax() != progressMax)
+                    mProgressBar.setMax(progressMax);
+                mProgressBar.setProgress(progress);
                 ShareUtil.setInt(getApplication(), ShareUtil.update_progress, progress);
-                if (progress >= pBar.getMax()) {
-                    ShareUtil.setBoolean(getApplication(), ShareUtil.update, false);
-                    DemoUtils.update = false;
-                    if (MD5.checkMd5(DemoUtils.RES_MD5, filePath))
-                        mHandler.sendEmptyMessage(1);
-                    else
-                        mHandler.sendEmptyMessage(2);
+                if (progress >= mProgressBar.getMax()) {
+                    Message msg = Message.obtain();
+                    msg.what = MSG_WHAT_UPDATE_SUCCESS;
+                    msg.obj = filePath;
+                    mHandler.sendMessage(msg);
                 }
             }
-        }, pBar);
-        updateThread = new Thread(new Runnable() {
+        });
+        mUpdateThread = new Thread(new Runnable() {
             @Override
             public void run() {
-                DemoUtils.startSychRes(Constants.RES_URL, MainActivity.this);
+                DemoUtils.startDownRes(Constants.RES_URL, MainActivity.this);
             }
         });
 
-        unZipThread = new Thread(new Runnable() {
+        mUnZipThread = new Thread(new Runnable() {
             @Override
             public void run() {
                 String filePath = Constants.RES_URL.substring(Constants.RES_URL.lastIndexOf("/") + 1);
                 DemoUtils.unzipFile(Constants.PATH_YWD_FILES, Constants.PATH_YWD_FILES + "/" + filePath);
                 initFiles();
-                sen3Msg();
+                sendChangeMsg();
             }
         });
 
-        webView = (WebView) findViewById(R.id.wv);
+        mWebView = (WebView) findViewById(R.id.wv);
         //加上下面这段代码可以使网页中的链接不以浏览器的方式打开
-        webView.setWebViewClient(new WebViewClient());
-        webView.setScrollBarStyle(View.SCROLLBARS_INSIDE_OVERLAY);//滚动条风格，为0指滚动条不占用空间，直接覆盖在网页上
+        mWebView.setWebViewClient(new WebViewClient());
+        mWebView.setScrollBarStyle(View.SCROLLBARS_INSIDE_OVERLAY);//滚动条风格，为0指滚动条不占用空间，直接覆盖在网页上
         //得到webview设置
-        WebSettings webSettings = webView.getSettings();
-        //允许使用javascript
+        WebSettings webSettings = mWebView.getSettings();
         webSettings.setJavaScriptEnabled(true);
-        //设置字符编码
         webSettings.setDefaultTextEncodingName("UTF-8");
-        //支持缩放
         webSettings.setSupportZoom(true);
         webSettings.setBuiltInZoomControls(true);
         webSettings.setUseWideViewPort(true);
         webSettings.setLoadWithOverviewMode(true);
-        webView.loadUrl("file:///android_asset/搜狗搜索引擎 - 上网从搜狗开始.htm");
+        initWVData();
     }
 
     private void initFiles() {
         String fileName = Constants.PATH_YWD_FILES + Constants.RES_URL.substring(Constants.RES_URL.lastIndexOf("/") + 1, Constants.RES_URL.lastIndexOf("."));
-        files = new File(fileName).listFiles(new FilenameFilter() {
+        mFiles = new File(fileName).listFiles(new FilenameFilter() {
 
             @Override
             public boolean accept(File file, String s) {
                 return s.contains(".");
             }
         });
-
     }
 
-    private void sen3Msg() {
-        if (files != null && files.length > 0) {
-            Message msg = Message.obtain();
-            msg.obj = files[0].getName();
-            msg.what = 3;
-            mHandler.sendMessage(msg);
-        }
+    private void sendChangeMsg() {
+        mHandler.sendEmptyMessage(MSG_WHAT_CHANGE_PAGE);
     }
 
     public void startRes(View v) {
         if (DemoUtils.isUpdating()) {
             Toast.makeText(getApplication(), "正在更新...", Toast.LENGTH_SHORT).show();
         } else {
-            if (DemoUtils.update)
-                updateThread.start();
+            if (YWDApp.update)
+                mUpdateThread.start();
             else
                 Toast.makeText(getApplication(), "已经更新过", Toast.LENGTH_SHORT).show();
         }
     }
 
     public void unzip(View v) {
-        if (DemoUtils.update) {
+        if (YWDApp.update) {
             Toast.makeText(getApplication(), "还没更新完成", Toast.LENGTH_SHORT).show();
             return;
         }
-        if (!DemoUtils.unzip) {
+        if (!YWDApp.unzip) {
             showWaitingDialog();
-            unZipThread.start();
+            mUnZipThread.start();
         } else {
             Toast.makeText(getApplication(), "已经解压完成", Toast.LENGTH_SHORT).show();
         }
     }
 
     public void showRes(View v) {
-        if (files == null || files.length <= 0) {
+        if (mFiles == null || mFiles.length <= 0) {
             Toast.makeText(getApplication(), "没有新的资源", Toast.LENGTH_SHORT).show();
             return;
         }
-        switch (state_index) {
-            case 0:
-                sen3Msg();
-                break;
-            case 3:
-                Message msg1 = Message.obtain();
-                msg1.obj = files[0].getName();
-                msg1.what = 3;
-                mHandler.sendMessage(msg1);//显示第一个更新网页
-                break;
-            case 4:
-                Message msg2 = Message.obtain();
-                msg2.obj = files[1].getName();
-                msg2.what = 4;
-                mHandler.sendMessage(msg2);//显示第二个更新网页
-                break;
-            case 5:
-                Message msg3 = Message.obtain();
-                msg3.obj = files[2].getName();
-                msg3.what = 5;
-                mHandler.sendMessage(msg3);//显示第三个更新网页
-                break;
-            default:
-                Toast.makeText(getApplication(), "正在更新", Toast.LENGTH_SHORT).show();
-        }
-
+        sendChangeMsg();
     }
 
     private void showWaitingDialog() {
@@ -203,21 +196,16 @@ public class MainActivity extends AppCompatActivity {
      * @setCancelable 为使屏幕不可点击，设置为不可取消(false)
      * 下载等事件完成后，主动调用函数关闭该Dialog
      */
-        waitingDialog =
+        mWaitingDialog =
                 new ProgressDialog(MainActivity.this);
-        waitingDialog.setTitle("正在解压");
-        waitingDialog.setMessage("解压完成后弹窗自动消失");
-        waitingDialog.setIndeterminate(true);
-        waitingDialog.setCancelable(false);
-        waitingDialog.show();
-    }
-
-    @Override
-    protected void onResume() {
-        super.onResume();
+        mWaitingDialog.setTitle("正在解压");
+        mWaitingDialog.setMessage("解压完成后弹窗自动消失");
+        mWaitingDialog.setIndeterminate(true);
+        mWaitingDialog.setCancelable(false);
+        mWaitingDialog.show();
     }
 
     public interface UpdateCallBack {
-        void update(int progress, String filePath);
+        void update(int progress, String filePath, int progressMax);
     }
 }

@@ -12,8 +12,6 @@ import java.math.BigInteger;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 
-import android.util.Log;
-
 public class MD5 {
     static String TAG = "MD5";
 
@@ -33,27 +31,24 @@ public class MD5 {
             }
             Input.close();
         } catch (NoSuchAlgorithmException e) {
-            // TODO Auto-generated catch block
             e.printStackTrace();
             return null;
         } catch (FileNotFoundException e) {
-            // TODO Auto-generated catch block
             e.printStackTrace();
             return null;
         } catch (IOException e) {
-            // TODO Auto-generated catch block
             e.printStackTrace();
             return null;
         }
         BigInteger mBInteger = new BigInteger(1, mMDigest.digest());
-        Log.v(TAG, "create_MD5=" + mBInteger.toString(16));
+        LogUtil.v(TAG, "create_MD5=" + mBInteger.toString(16));
         return mBInteger.toString(16);
 
     }
 
-    public static boolean checkMd5(String Md5, String file) {
+    static boolean checkMd5(String Md5, String file) {
         String str = createMd5(file);
-        Log.d(TAG, "md5sum = " + str);
+        LogUtil.d(TAG, "md5sum = " + str);
         if (Md5.compareTo(str) == 0)
             return true;
         else

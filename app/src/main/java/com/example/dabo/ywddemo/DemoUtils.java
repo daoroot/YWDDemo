@@ -1,7 +1,6 @@
 package com.example.dabo.ywddemo;
 
 import android.content.Context;
-import android.widget.ProgressBar;
 
 import java.io.BufferedReader;
 import java.io.File;
@@ -22,48 +21,36 @@ import java.util.zip.ZipInputStream;
 
 public class DemoUtils {
 
-    static String RES_MD5 = "902eee7540c34c6ce1ef6646109daf80";//资源文件md5
-    static boolean update;//资源文件是否要更新
-    static boolean unzip;//资源文件是否压缩
+    private static String Tag = "DemoUtils";
 
-    private static String fileName;
-    private static int threadCount = 0;// 声明线程数量
     private static MainActivity.UpdateCallBack updateCallBack;
     private static AtomicInteger progress;
-    private static ProgressBar pBar;
+    private static int progressMax;
     private static boolean isUpdating = false;
 
-    /**
-     * @param PATH 下载地址    test:ftp://qxu1146240051@121.42.89.50/htdocs/res_new.zip
-     */
-    public static void startSychRes(String PATH, Context ctx) {
+    static void startDownRes(String PATH, Context ctx) {
         progress = new AtomicInteger(0);
         isUpdating = true;
         try {
             URL url = new URL(PATH);
             // 获取连接
             HttpURLConnection conn = (HttpURLConnection) url.openConnection();
-//            conn.setRequestMethod("POST");
-//            conn.setRequestProperty("Accept-Encoding", "identity");
             // 通过获取连接定义文件名
             String[] str = PATH.split("/");
-            fileName = str[str.length - 1];
+            String fileName = str[str.length - 1];
             // 获取下载文件大小
             int fileLength = conn.getContentLength();
-            pBar.setMax(fileLength);
-//            System.out.println(fileName);
+            progressMax = fileLength;
             File file = new File(Constants.PATH_YWD_FILES);
             if (!file.exists()) {
                 file.mkdirs();
             }
-
             // 在本地创建一个与服务器大小一致的可随机写入文件
             RandomAccessFile raf = new RandomAccessFile(Constants.PATH_YWD_FILES + fileName, "rwd");
-            System.out.println(fileLength);// 测试用
+            LogUtil.v(Tag, "创建资源更新包文件：" + fileLength);
             raf.setLength(fileLength);
             ShareUtil.setInt(ctx, ShareUtil.update_max, fileLength);
-            // 自定义线程数量
-            threadCount = 3;
+            int threadCount = 3;//自定义线程数
             // 计算每条线程下载数据的大小
             int blockSize = fileLength / threadCount;
             // 启动线程下载
@@ -82,23 +69,22 @@ public class DemoUtils {
         }
     }
 
-    public static void setUpdateCallBack(MainActivity.UpdateCallBack ucb, ProgressBar pb) {
+    static void setUpdateCallBack(MainActivity.UpdateCallBack ucb) {
         updateCallBack = ucb;
-        pBar = pb;
     }
 
-    public static boolean isUpdating() {
+    static boolean isUpdating() {
         return isUpdating;
     }
 
-    static class DownLoadThread implements Runnable {
+    private static class DownLoadThread implements Runnable {
         private int threadId;
         private int startPos;
         private int endPos;
         private String path;
         private int threadTotal = 0;
 
-        public DownLoadThread(int threadId, int startPos, int endPos, String path) {
+        DownLoadThread(int threadId, int startPos, int endPos, String path) {
             super();
             this.threadId = threadId;
             this.startPos = startPos;
@@ -124,12 +110,12 @@ public class DemoUtils {
                 conn.setReadTimeout(5000);
 
                 file = new File(Constants.PATH_YWD_FILES + threadId + ".txt");
-                System.out.println("file.exists:" + file.exists() + " ,file.length:" + file.length());
+                LogUtil.v(Tag, "file.exists:" + file.exists() + " ,file.length:" + file.length());
                 if (file.exists() && file.length() > 0) {
                     BufferedReader br = new BufferedReader(
                             new InputStreamReader(new FileInputStream(file)));
                     String saveStartPos = br.readLine();
-                    System.out.println("线程" + threadId + " 已写：" + saveStartPos);
+                    LogUtil.v(Tag, "线程" + threadId + " 已写：" + saveStartPos);
                     if (saveStartPos != null && saveStartPos.length() > 0) {
                         startPos = Integer.parseInt(saveStartPos);
                     }
@@ -140,26 +126,26 @@ public class DemoUtils {
                         + endPos);
                 raf = new RandomAccessFile(Constants.PATH_YWD_FILES + fileName, "rwd");// 存储下载文件的随机写入文件
                 raf.seek(startPos);// 设置开始下载的位置
-                System.out.println("线程" + threadId + ":" + startPos + "~~"
+                LogUtil.v(Tag, "线程" + threadId + ":" + startPos + "~~"
                         + endPos);
                 is = conn.getInputStream();
                 byte[] b = new byte[1024 * 1024 * 10];
-                int len = -1;
+                int len;
                 int newPos = startPos;
                 RandomAccessFile rr;
                 while ((len = is.read(b)) != -1) {
                     rr = new RandomAccessFile(file, "rwd");// 存储下载标记的文件
                     raf.write(b, 0, len);
                     // 将下载标记存入指定文档
-                    String savaPoint = String.valueOf(newPos += len);
-                    rr.write(savaPoint.getBytes());
+                    String savePoint = String.valueOf(newPos += len);
+                    rr.write(savePoint.getBytes());
                     progress.getAndAdd(len);
-                    updateCallBack.update(progress.get(), Constants.PATH_YWD_FILES + fileName);
+                    updateCallBack.update(progress.get(), Constants.PATH_YWD_FILES + fileName, progressMax);
                     rr.close();
                 }
 
-                System.out.println("线程" + threadId + "下载完成");
-                if (progress.get() >= pBar.getMax())
+                LogUtil.v(Tag, "线程" + threadId + "下载完成");
+                if (progress.get() >= progressMax)
                     isUpdating = false;
             } catch (Exception e) {
                 e.printStackTrace();
@@ -178,14 +164,14 @@ public class DemoUtils {
         }
     }
 
-    public static void unzipFile(String targetPath, String zipFilePath) {
+    static void unzipFile(String targetPath, String zipFilePath) {
 
         try {
             File zipFile = new File(zipFilePath);
             InputStream is = new FileInputStream(zipFile);
             ZipInputStream zis = new ZipInputStream(is);
-            ZipEntry entry = null;
-            System.out.println("开始解压:" + zipFile.getName() + "...");
+            ZipEntry entry;
+            LogUtil.v(Tag, "开始解压:" + zipFile.getName() + "...");
             while ((entry = zis.getNextEntry()) != null) {
                 String zipPath = entry.getName();
                 try {
@@ -213,16 +199,16 @@ public class DemoUtils {
                         fos.close();
 
                     }
-                    System.out.println("成功解压:" + zipPath);
+                    LogUtil.d(Tag, "成功解压:" + zipPath);
 
                 } catch (Exception e) {
-                    System.out.println("解压" + zipPath + "失败");
-                    continue;
+                    LogUtil.d(Tag, "解压" + zipPath + "失败");
+//                    continue;
                 }
             }
             zis.close();
             is.close();
-            System.out.println("解压结束");
+            LogUtil.d(Tag, "解压结束");
         } catch (Exception e) {
             e.printStackTrace();
         }
